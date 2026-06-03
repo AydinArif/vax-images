@@ -1,10 +1,9 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const axios = require("axios");
 const express = require("express");
 const { nanoid } = require("nanoid");
 require("dotenv").config();
 
-// Initialize Discord Client
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
@@ -34,16 +33,49 @@ async function uploadToGitHub(buffer) {
   return id;
 }
 
+// Helper function to delete an image from GitHub automatically
+async function deleteFromGitHub(id) {
+  const path = `images/${id}.png`;
+  const url = `${GITHUB_API}/repos/${process.env.GITHUB_REPO}/contents/${path}`;
+  const headers = {
+    Authorization: `token ${process.env.GITHUB_TOKEN}`,
+    Accept: "application/vnd.github+json",
+  };
+
+  // GitHub requires the file's unique 'sha' ID to delete it safely via API
+  const fileData = await axios.get(url, { headers });
+  const sha = fileData.data.sha;
+
+  await axios.delete(url, {
+    headers,
+    data: {
+      message: `delete ${id}`,
+      sha: sha,
+    },
+  });
+}
+
 // ---------------- DISCORD BOT LOGIC ----------------
 
-// Automatically register slash commands when the bot starts
 async function registerSlashCommands() {
   const commands = [
+    // Command 1: Convert/Upload
     new SlashCommandBuilder()
       .setName("convert")
       .setDescription("Upload an image to your custom domain")
+      .setContexts([0, 1, 2])
       .addAttachmentOption(option =>
         option.setName("image").setDescription("The image to upload").setRequired(true)
+      )
+      .toJSON(),
+
+    // Command 2: Delete Image (NEW)
+    new SlashCommandBuilder()
+      .setName("delete")
+      .setDescription("Delete an image from your repository using its ID")
+      .setContexts([0, 1, 2])
+      .addStringOption(option =>
+        option.setName("id").setDescription("The 8-character ID of the image (e.g., 59U2Abz_)").setRequired(true)
       )
       .toJSON()
   ];
@@ -62,31 +94,72 @@ async function registerSlashCommands() {
   }
 }
 
-// Listen for the 'convert' command interaction
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  // HANDLE CONVERT COMMAND
   if (interaction.commandName === "convert") {
     const file = interaction.options.getAttachment("image");
 
-    // Defer the reply to give the bot 15 minutes to process instead of the strict 3-second limit
-    await interaction.deferReply();
+    const processingEmbed = new EmbedBuilder()
+      .setColor("#5865F2")
+      .setDescription("⏳ **Processing your image and uploading to GitHub...**");
+
+    await interaction.reply({ embeds: [processingEmbed] });
 
     try {
-      // Download the image from Discord
-      const res = await axios.get(file.url, {
-        responseType: "arraybuffer",
-      });
-
-      // Upload to GitHub
+      const res = await axios.get(file.url, { responseType: "arraybuffer" });
       const id = await uploadToGitHub(Buffer.from(res.data));
       const url = `${process.env.BASE_URL}/${id}`;
 
-      // Edit the deferred reply with the final link
-      await interaction.editReply(`✅ Uploaded: ${url}`);
+      const successEmbed = new EmbedBuilder()
+        .setColor("#2ECC71")
+        .setTitle("📦 Image Upload Successful!")
+        .setDescription(`Your image has been processed and hosted under your custom domain.`)
+        .addFields(
+          { name: "🔗 Short URL", value: `\`${url}\`\n[Open Link](${url})`, inline: false },
+          { name: "🆔 Image ID", value: `\`${id}\``, inline: true }
+        )
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [successEmbed] });
     } catch (e) {
       console.error(e);
-      await interaction.editReply("❌ Failed to process and upload image.");
+      const errorEmbed = new EmbedBuilder()
+        .setColor("#E74C3C")
+        .setTitle("❌ Upload Failed")
+        .setDescription("Something went wrong while trying to process and upload your image.");
+      await interaction.editReply({ embeds: [errorEmbed] });
+    }
+  }
+
+  // HANDLE DELETE COMMAND (NEW)
+  if (interaction.commandName === "delete") {
+    const id = interaction.options.getString("id").trim();
+
+    const processingEmbed = new EmbedBuilder()
+      .setColor("#5865F2")
+      .setDescription(`⏳ **Attempting to delete image \`${id}\` from GitHub...**`);
+
+    await interaction.reply({ embeds: [processingEmbed] });
+
+    try {
+      await deleteFromGitHub(id);
+
+      const deleteEmbed = new EmbedBuilder()
+        .setColor("#E67E22") // Orange warning/removal color
+        .setTitle("🗑️ Image Deleted Successfully")
+        .setDescription(`The image file associated with ID \`${id}\` has been scrubbed from your GitHub repository.`)
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [deleteEmbed] });
+    } catch (e) {
+      console.error(e);
+      const errorEmbed = new EmbedBuilder()
+        .setColor("#E74C3C")
+        .setTitle("❌ Deletion Failed")
+        .setDescription(`Could not find or delete an image with the ID \`${id}\`. Make sure the ID is correct.`);
+      await interaction.editReply({ embeds: [errorEmbed] });
     }
   }
 });
@@ -94,23 +167,17 @@ client.on("interactionCreate", async (interaction) => {
 // ---------------- EXPRESS REDIRECT SERVER ----------------
 const app = express();
 
-// Health check endpoint for Koyeb deployment
 app.get("/health", (req, res) => res.send("OK"));
 
-// Redirect handler
 app.get("/:id", (req, res) => {
   const id = req.params.id;
   const rawUrl = `https://raw.githubusercontent.com/${process.env.GITHUB_REPO}/main/images/${id}.png`;
-  
   res.redirect(rawUrl);
 });
 
-// Start everything up
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   console.log(`Express Redirect Server running on port ${PORT}`);
-  
-  // Register commands and log into Discord after Express starts
   await registerSlashCommands();
   client.login(process.env.DISCORD_TOKEN);
 });
