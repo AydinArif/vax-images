@@ -69,7 +69,7 @@ async function registerSlashCommands() {
       )
       .toJSON(),
 
-    // Command 2: Delete Image (NEW)
+    // Command 2: Delete Image
     new SlashCommandBuilder()
       .setName("delete")
       .setDescription("Delete an image from your repository using its ID")
@@ -133,7 +133,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // HANDLE DELETE COMMAND (NEW)
+  // HANDLE DELETE COMMAND
   if (interaction.commandName === "delete") {
     const id = interaction.options.getString("id").trim();
 
@@ -147,7 +147,7 @@ client.on("interactionCreate", async (interaction) => {
       await deleteFromGitHub(id);
 
       const deleteEmbed = new EmbedBuilder()
-        .setColor("#E67E22") // Orange warning/removal color
+        .setColor("#E67E22")
         .setTitle("🗑️ Image Deleted Successfully")
         .setDescription(`The image file associated with ID \`${id}\` has been scrubbed from your GitHub repository.`)
         .setTimestamp();
@@ -175,7 +175,8 @@ app.get("/:id", (req, res) => {
   res.redirect(rawUrl);
 });
 
-const PORT = process.env.PORT || 3000;
+// FIXED FOR RENDER: Dynamically binds to Render's internal port config (defaults to 10000)
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, async () => {
   console.log(`Express Redirect Server running on port ${PORT}`);
   await registerSlashCommands();
