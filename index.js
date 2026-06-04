@@ -55,6 +55,25 @@ async function deleteFromGitHub(id) {
   });
 }
 
+// Helper function to fetch all hosted files from GitHub
+async function fetchRepoImages() {
+  const url = `${GITHUB_API}/repos/${process.env.GITHUB_REPO}/contents/images`;
+  const headers = {
+    Authorization: `token ${process.env.GITHUB_TOKEN}`,
+    Accept: "application/vnd.github+json",
+  };
+
+  try {
+    const response = await axios.get(url, { headers });
+    // Filter to only grab .png files out of the folder
+    return response.data.filter(file => file.name.endsWith(".png"));
+  } catch (error) {
+    // If the directory doesn't exist yet or is empty, return empty array
+    if (error.response && error.response.status === 404) return [];
+    throw error;
+  }
+}
+
 // ---------------- DISCORD BOT LOGIC ----------------
 
 async function registerSlashCommands() {
@@ -77,6 +96,13 @@ async function registerSlashCommands() {
       .addStringOption(option =>
         option.setName("id").setDescription("The 8-character ID of the image (e.g., 59U2Abz_)").setRequired(true)
       )
+      .toJSON(),
+
+    // Command 3: List Images (NEW)
+    new SlashCommandBuilder()
+      .setName("list")
+      .setDescription("Show total image count and active IDs inside your storage")
+      .setContexts([0, 1, 2])
       .toJSON()
   ];
 
@@ -162,6 +188,52 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.editReply({ embeds: [errorEmbed] });
     }
   }
+
+  // HANDLE LIST COMMAND (NEW)
+  if (interaction.commandName === "list") {
+    const loadingEmbed = new EmbedBuilder()
+      .setColor("#5865F2")
+      .setDescription("⏳ **Fetching image counts and details from GitHub directory...**");
+
+    await interaction.reply({ embeds: [loadingEmbed] });
+
+    try {
+      const images = await fetchRepoImages();
+
+      if (images.length === 0) {
+        const emptyEmbed = new EmbedBuilder()
+          .setColor("#95A5A6")
+          .setTitle("📁 Storage Empty")
+          .setDescription("There are currently no pictures hosted inside your repository directory.")
+          .setTimestamp();
+        return await interaction.editReply({ embeds: [emptyEmbed] });
+      }
+
+      // Convert filenames (like "abcd1234.png") into printable formatting ids
+      const idList = images.map((img, index) => {
+        const cleanId = img.name.replace(".png", "");
+        return `\`${index + 1}.\` **${cleanId}** ([Link](${process.env.BASE_URL}/${cleanId}))`;
+      }).join("\n");
+
+      // Handle Discord's 4096 character limit safety just in case
+      const trimmedList = idList.length > 3800 ? idList.substring(0, 3800) + "\n*...and more files*" : idList;
+
+      const listEmbed = new EmbedBuilder()
+        .setColor("#3498DB")
+        .setTitle("📊 Storage Directory Overview")
+        .setDescription(`### Total Hosted Pictures: \`${images.length}\`\n\n${trimmedList}`)
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [listEmbed] });
+    } catch (e) {
+      console.error(e);
+      const errorEmbed = new EmbedBuilder()
+        .setColor("#E74C3C")
+        .setTitle("❌ Fetch Failed")
+        .setDescription("Could not successfully request file storage contents from GitHub.");
+      await interaction.editReply({ embeds: [errorEmbed] });
+    }
+  }
 });
 
 // ---------------- EXPRESS REDIRECT SERVER ----------------
@@ -175,7 +247,6 @@ app.get("/:id", (req, res) => {
   res.redirect(rawUrl);
 });
 
-// FIXED FOR RENDER: Dynamically binds to Render's internal port config (defaults to 10000)
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, async () => {
   console.log(`Express Redirect Server running on port ${PORT}`);
