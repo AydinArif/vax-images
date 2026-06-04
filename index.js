@@ -81,7 +81,7 @@ async function registerSlashCommands() {
     // Command 1: Convert/Upload
     new SlashCommandBuilder()
       .setName("convert")
-      .setDescription("Upload an image to your custom domain")
+      .setDescription("Upload an image to your database")
       .setContexts([0, 1, 2])
       .addAttachmentOption(option =>
         option.setName("image").setDescription("The image to upload").setRequired(true)
@@ -91,17 +91,17 @@ async function registerSlashCommands() {
     // Command 2: Delete Image
     new SlashCommandBuilder()
       .setName("delete")
-      .setDescription("Delete an image from your repository using its ID")
+      .setDescription("Delete an image from your database using its ID")
       .setContexts([0, 1, 2])
       .addStringOption(option =>
         option.setName("id").setDescription("The 8-character ID of the image (e.g., 59U2Abz_)").setRequired(true)
       )
       .toJSON(),
 
-    // Command 3: List Images (NEW)
+    // Command 3: List Images
     new SlashCommandBuilder()
       .setName("list")
-      .setDescription("Show total image count and active IDs inside your storage")
+      .setDescription("Show total image count and active IDs inside your database")
       .setContexts([0, 1, 2])
       .toJSON()
   ];
@@ -129,7 +129,7 @@ client.on("interactionCreate", async (interaction) => {
 
     const processingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription("⏳ **Processing your image and uploading to GitHub...**");
+      .setDescription("⏳ **Processing your image and uploading to database...**");
 
     await interaction.reply({ embeds: [processingEmbed] });
 
@@ -141,7 +141,7 @@ client.on("interactionCreate", async (interaction) => {
       const successEmbed = new EmbedBuilder()
         .setColor("#2ECC71")
         .setTitle("📦 Image Upload Successful!")
-        .setDescription(`Your image has been processed and hosted under your custom domain.`)
+        .setDescription(`Your image has been processed and hosted under this custom domain.`)
         .addFields(
           { name: "🔗 Short URL", value: `\`${url}\`\n[Open Link](${url})`, inline: false },
           { name: "🆔 Image ID", value: `\`${id}\``, inline: true }
@@ -165,7 +165,7 @@ client.on("interactionCreate", async (interaction) => {
 
     const processingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription(`⏳ **Attempting to delete image \`${id}\` from GitHub...**`);
+      .setDescription(`⏳ **Attempting to delete image \`${id}\` from database...**`);
 
     await interaction.reply({ embeds: [processingEmbed] });
 
@@ -175,7 +175,7 @@ client.on("interactionCreate", async (interaction) => {
       const deleteEmbed = new EmbedBuilder()
         .setColor("#E67E22")
         .setTitle("🗑️ Image Deleted Successfully")
-        .setDescription(`The image file associated with ID \`${id}\` has been scrubbed from your GitHub repository.`)
+        .setDescription(`The image file associated with ID \`${id}\` has been removed from your database.`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [deleteEmbed] });
@@ -189,11 +189,11 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // HANDLE LIST COMMAND (NEW)
+  // HANDLE LIST COMMAND
   if (interaction.commandName === "list") {
     const loadingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription("⏳ **Fetching image counts and details from GitHub directory...**");
+      .setDescription("⏳ **Fetching image counts and details from database...**");
 
     await interaction.reply({ embeds: [loadingEmbed] });
 
@@ -204,7 +204,7 @@ client.on("interactionCreate", async (interaction) => {
         const emptyEmbed = new EmbedBuilder()
           .setColor("#95A5A6")
           .setTitle("📁 Storage Empty")
-          .setDescription("There are currently no pictures hosted inside your repository directory.")
+          .setDescription("No pictures found in database.")
           .setTimestamp();
         return await interaction.editReply({ embeds: [emptyEmbed] });
       }
@@ -221,7 +221,7 @@ client.on("interactionCreate", async (interaction) => {
       const listEmbed = new EmbedBuilder()
         .setColor("#3498DB")
         .setTitle("📊 Storage Directory Overview")
-        .setDescription(`### Total Hosted Pictures: \`${images.length}\`\n\n${trimmedList}`)
+        .setDescription(`### Total Number Of Pictures: \`${images.length}\`\n\n${trimmedList}`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [listEmbed] });
@@ -230,7 +230,7 @@ client.on("interactionCreate", async (interaction) => {
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
         .setTitle("❌ Fetch Failed")
-        .setDescription("Could not successfully request file storage contents from GitHub.");
+        .setDescription("Could not successfully request file storage contents from databse.");
       await interaction.editReply({ embeds: [errorEmbed] });
     }
   }
@@ -239,14 +239,92 @@ client.on("interactionCreate", async (interaction) => {
 // ---------------- EXPRESS REDIRECT SERVER ----------------
 const app = express();
 
-app.get("/health", (req, res) => res.send("OK"));
+// Main landing page check (Fixes "Cannot GET /")
+app.get("/", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>System Status | Vax Images</title>
+        <style>
+            body {
+                background-color: #0f111a;
+                color: #ffffff;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+            }
+            .card {
+                background-color: #1a1c29;
+                padding: 2.5rem;
+                border-radius: 12px;
+                box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+                text-align: center;
+                border: 1px solid #2d3142;
+                max-width: 400px;
+                width: 100%;
+            }
+            .status-icon {
+                font-size: 3.5rem;
+                margin-bottom: 1rem;
+                animation: pulse 2s infinite;
+            }
+            h1 {
+                margin: 0 0 0.5rem 0;
+                font-size: 1.8rem;
+                letter-spacing: 0.5px;
+            }
+            p {
+                color: #8b92b6;
+                margin: 0 0 1.5rem 0;
+                font-size: 1rem;
+            }
+            .badge {
+                background-color: #05c46b;
+                color: #ffffff;
+                padding: 0.5rem 1rem;
+                border-radius: 20px;
+                font-weight: 600;
+                font-size: 0.85rem;
+                text-transform: uppercase;
+                display: inline-block;
+                letter-spacing: 1px;
+            }
+            @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.05); }
+                100% { transform: scale(1); }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div class="status-icon">🐒</div>
+            <h1>Jahmunkey Image Service</h1>
+            <p>Your private image redirect engine is operational.</p>
+            <div class="badge">● Bot Online</div>
+        </div>
+    </body>
+    </html>
+  `);
+});
 
+// App endpoint for Render environment validation checks
+app.get("/health", (req, res) => res.status(200).send("OK"));
+
+// Main image router redirect engine
 app.get("/:id", (req, res) => {
   const id = req.params.id;
   const rawUrl = `https://raw.githubusercontent.com/${process.env.GITHUB_REPO}/main/images/${id}.png`;
   res.redirect(rawUrl);
 });
 
+// Setup dynamic port binding for Render deployment stability
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, async () => {
   console.log(`Express Redirect Server running on port ${PORT}`);
