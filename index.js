@@ -4,11 +4,26 @@ const express = require("express");
 const { nanoid } = require("nanoid");
 require("dotenv").config();
 
+// Mark the exact timestamp when the bot boots up for uptime tracking
+const bootTime = Date.now();
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
 
 const GITHUB_API = "https://api.github.com";
+
+// Helper function to convert boot runtime into a clean string
+function getUptimeString() {
+  let totalSeconds = Math.floor((Date.now() - bootTime) / 1000);
+  let days = Math.floor(totalSeconds / 86400);
+  totalSeconds %= 86400;
+  let hours = Math.floor(totalSeconds / 3600);
+  totalSeconds %= 3600;
+  let minutes = Math.floor(totalSeconds / 60);
+  let seconds = totalSeconds % 60;
+  return `${days}d, ${hours}h, ${minutes}m, ${seconds}s`;
+}
 
 // Helper function to upload image buffer to GitHub
 async function uploadToGitHub(buffer) {
@@ -42,7 +57,6 @@ async function deleteFromGitHub(id) {
     Accept: "application/vnd.github+json",
   };
 
-  // GitHub requires the file's unique 'sha' ID to delete it safely via API
   const fileData = await axios.get(url, { headers });
   const sha = fileData.data.sha;
 
@@ -65,10 +79,8 @@ async function fetchRepoImages() {
 
   try {
     const response = await axios.get(url, { headers });
-    // Filter to only grab .png files out of the folder
     return response.data.filter(file => file.name.endsWith(".png"));
   } catch (error) {
-    // If the directory doesn't exist yet or is empty, return empty array
     if (error.response && error.response.status === 404) return [];
     throw error;
   }
@@ -81,7 +93,7 @@ async function registerSlashCommands() {
     // Command 1: Convert/Upload
     new SlashCommandBuilder()
       .setName("convert")
-      .setDescription("Upload an image to your database")
+      .setDescription("Upload an image to the database")
       .setContexts([0, 1, 2])
       .addAttachmentOption(option =>
         option.setName("image").setDescription("The image to upload").setRequired(true)
@@ -91,7 +103,7 @@ async function registerSlashCommands() {
     // Command 2: Delete Image
     new SlashCommandBuilder()
       .setName("delete")
-      .setDescription("Delete an image from your database using its ID")
+      .setDescription("Delete an image from the database")
       .setContexts([0, 1, 2])
       .addStringOption(option =>
         option.setName("id").setDescription("The 8-character ID of the image (e.g., 59U2Abz_)").setRequired(true)
@@ -102,6 +114,13 @@ async function registerSlashCommands() {
     new SlashCommandBuilder()
       .setName("list")
       .setDescription("Show total image count and active IDs inside your database")
+      .setContexts([0, 1, 2])
+      .toJSON(),
+
+    // Command 4: Ping Status (NEW)
+    new SlashCommandBuilder()
+      .setName("ping")
+      .setDescription("Check Jahmunkey's dynamic connection latency and system uptime")
       .setContexts([0, 1, 2])
       .toJSON()
   ];
@@ -141,7 +160,7 @@ client.on("interactionCreate", async (interaction) => {
       const successEmbed = new EmbedBuilder()
         .setColor("#2ECC71")
         .setTitle("📦 Image Upload Successful!")
-        .setDescription(`Your image has been processed and hosted under this custom domain.`)
+        .setDescription(`Your image has been processed and uploaded.`)
         .addFields(
           { name: "🔗 Short URL", value: `\`${url}\`\n[Open Link](${url})`, inline: false },
           { name: "🆔 Image ID", value: `\`${id}\``, inline: true }
@@ -175,7 +194,7 @@ client.on("interactionCreate", async (interaction) => {
       const deleteEmbed = new EmbedBuilder()
         .setColor("#E67E22")
         .setTitle("🗑️ Image Deleted Successfully")
-        .setDescription(`The image file associated with ID \`${id}\` has been removed from your database.`)
+        .setDescription(`The image file associated with ID \`${id}\` has been deleted from your database.`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [deleteEmbed] });
@@ -203,25 +222,23 @@ client.on("interactionCreate", async (interaction) => {
       if (images.length === 0) {
         const emptyEmbed = new EmbedBuilder()
           .setColor("#95A5A6")
-          .setTitle("📁 Storage Empty")
-          .setDescription("No pictures found in database.")
+          .setTitle("📁 Database Empty")
+          .setDescription("There are currently no pictures inside your databse.")
           .setTimestamp();
         return await interaction.editReply({ embeds: [emptyEmbed] });
       }
 
-      // Convert filenames (like "abcd1234.png") into printable formatting ids
       const idList = images.map((img, index) => {
         const cleanId = img.name.replace(".png", "");
         return `\`${index + 1}.\` **${cleanId}** ([Link](${process.env.BASE_URL}/${cleanId}))`;
       }).join("\n");
 
-      // Handle Discord's 4096 character limit safety just in case
       const trimmedList = idList.length > 3800 ? idList.substring(0, 3800) + "\n*...and more files*" : idList;
 
       const listEmbed = new EmbedBuilder()
         .setColor("#3498DB")
-        .setTitle("📊 Storage Directory Overview")
-        .setDescription(`### Total Number Of Pictures: \`${images.length}\`\n\n${trimmedList}`)
+        .setTitle("📊 Database Overview")
+        .setDescription(`### Total Pictures: \`${images.length}\`\n\n${trimmedList}`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [listEmbed] });
@@ -230,16 +247,34 @@ client.on("interactionCreate", async (interaction) => {
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
         .setTitle("❌ Fetch Failed")
-        .setDescription("Could not successfully request file storage contents from databse.");
+        .setDescription("Could not successfully request file storage contents from database.");
       await interaction.editReply({ embeds: [errorEmbed] });
     }
+  }
+
+  // HANDLE PING COMMAND (NEW)
+  if (interaction.commandName === "ping") {
+    const latency = client.ws.ping;
+    const uptime = getUptimeString();
+
+    const pingEmbed = new EmbedBuilder()
+      .setColor("#9B59B6") // Purple border matching your logger theme style
+      .setTitle("🐒 Jahmunkey Status")
+      .addFields(
+        { name: "Connection", value: "✅ Online", inline: true },
+        { name: "Latency", value: `📡 ${latency}ms`, inline: true },
+        { name: "Uptime", value: `⏳ ${uptime}`, inline: false }
+      )
+      .setFooter({ text: "Jahmunkey Image Management System" })
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [pingEmbed] });
   }
 });
 
 // ---------------- EXPRESS REDIRECT SERVER ----------------
 const app = express();
 
-// Main landing page check (Fixes "Cannot GET /")
 app.get("/", (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -314,17 +349,14 @@ app.get("/", (req, res) => {
   `);
 });
 
-// App endpoint for Render environment validation checks
 app.get("/health", (req, res) => res.status(200).send("OK"));
 
-// Main image router redirect engine
 app.get("/:id", (req, res) => {
   const id = req.params.id;
   const rawUrl = `https://raw.githubusercontent.com/${process.env.GITHUB_REPO}/main/images/${id}.png`;
   res.redirect(rawUrl);
 });
 
-// Setup dynamic port binding for Render deployment stability
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, async () => {
   console.log(`Express Redirect Server running on port ${PORT}`);
