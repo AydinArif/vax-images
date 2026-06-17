@@ -95,7 +95,7 @@ async function registerSlashCommands() {
     // Command 1: Image Upload (Updated Name)
     new SlashCommandBuilder()
       .setName("image-upload")
-      .setDescription("Upload an image asset to your custom domain")
+      .setDescription("Upload an image to your database")
       .setContexts([0, 1, 2])
       .addAttachmentOption(option =>
         option.setName("image").setDescription("The image file to upload").setRequired(true)
@@ -105,7 +105,7 @@ async function registerSlashCommands() {
     // Command 2: Video Upload (Updated Name)
     new SlashCommandBuilder()
       .setName("video-upload")
-      .setDescription("Upload a video clip to your custom domain")
+      .setDescription("Upload a video clip to your database")
       .setContexts([0, 1, 2])
       .addAttachmentOption(option =>
         option.setName("video").setDescription("The video file to upload").setRequired(true)
@@ -114,7 +114,7 @@ async function registerSlashCommands() {
 
     new SlashCommandBuilder()
       .setName("delete")
-      .setDescription("Delete a file from your repository using its ID")
+      .setDescription("Delete a file from your database using its ID")
       .setContexts([0, 1, 2])
       .addStringOption(option =>
         option.setName("id").setDescription("The character ID code of the file").setRequired(true)
@@ -123,7 +123,7 @@ async function registerSlashCommands() {
 
     new SlashCommandBuilder()
       .setName("list")
-      .setDescription("Show total asset counts and active IDs inside your storage")
+      .setDescription("Show total media counts and active IDs inside your database")
       .setContexts([0, 1, 2])
       .toJSON(),
 
@@ -155,7 +155,7 @@ client.on("interactionCreate", async (interaction) => {
 
     const processingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription(`⏳ **Processing your file and syncing upstream to GitHub...**`);
+      .setDescription(`⏳ **Processing your file and syncing upstream to database...**`);
 
     await interaction.reply({ embeds: [processingEmbed] });
 
@@ -172,7 +172,7 @@ client.on("interactionCreate", async (interaction) => {
       const successEmbed = new EmbedBuilder()
         .setColor("#2ECC71")
         .setTitle(`📦 ${isVideoFile ? "Video" : "Image"} Upload Successful!`)
-        .setDescription(`Your file has been processed and hosted under your custom domain.`)
+        .setDescription(`Your file has been added to your database.`)
         .addFields(
           { name: "🔗 Short URL", value: `\`${url}\`\n[Open Link](${url})`, inline: false },
           { name: "🆔 File ID", value: `\`${shortId}\` (\`.${ext}\`)`, inline: true }
@@ -189,7 +189,7 @@ client.on("interactionCreate", async (interaction) => {
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
         .setTitle("❌ Upload Failed")
-        .setDescription("Something went wrong while trying to process your asset file.");
+        .setDescription("Something went wrong while trying to process your file.");
       await interaction.editReply({ embeds: [errorEmbed], content: null });
     }
   }
@@ -200,7 +200,7 @@ client.on("interactionCreate", async (interaction) => {
 
     const processingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription(`⏳ **Attempting to purge asset reference \`${id}\` from GitHub...**`);
+      .setDescription(`⏳ **Attempting to delete asset reference \`${id}\` from database...**`);
 
     await interaction.reply({ embeds: [processingEmbed] });
 
@@ -209,8 +209,8 @@ client.on("interactionCreate", async (interaction) => {
 
       const deleteEmbed = new EmbedBuilder()
         .setColor("#E67E22")
-        .setTitle("🗑️ Storage Cleared")
-        .setDescription(`The asset file associated with ID \`${id}\` has been scrubbed from your GitHub repository.`)
+        .setTitle("🗑️ Media Deleted")
+        .setDescription(`The asset file associated with ID \`${id}\` has been deleted from your database.`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [deleteEmbed] });
@@ -228,7 +228,7 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.commandName === "list") {
     const loadingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription("⏳ **Fetching media counts and file index from GitHub...**");
+      .setDescription("⏳ **Fetching media from the database...**");
 
     await interaction.reply({ embeds: [loadingEmbed] });
 
@@ -238,8 +238,8 @@ client.on("interactionCreate", async (interaction) => {
       if (images.length === 0) {
         const emptyEmbed = new EmbedBuilder()
           .setColor("#95A5A6")
-          .setTitle("📁 Storage Empty")
-          .setDescription("There are currently no assets hosted inside your repository path.")
+          .setTitle("📁 Database Empty")
+          .setDescription("There are currently media in your database.")
           .setTimestamp();
         return await interaction.editReply({ embeds: [emptyEmbed] });
       }
@@ -255,8 +255,8 @@ client.on("interactionCreate", async (interaction) => {
 
       const listEmbed = new EmbedBuilder()
         .setColor("#3498DB")
-        .setTitle("📊 Storage Directory Overview")
-        .setDescription(`### Total Hosted Media: \`${images.length}\`\n\n${trimmedList}`)
+        .setTitle("📊 Database Overview")
+        .setDescription(`### Total Media: \`${images.length}\`\n\n${trimmedList}`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [listEmbed] });
