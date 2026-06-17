@@ -1,4 +1,5 @@
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } = require("@aws-sdk/client-s3");
 const axios = require("axios");
 const express = require("express");
 const { nanoid } = require("nanoid");
@@ -10,7 +11,15 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
 
-const GITHUB_API = "https://api.github.com";
+// Initialize S3 Client configured explicitly for Cloudflare R2
+const s3 = new S3Client({
+  region: "auto",
+  endpoint: process.env.R2_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  },
+});
 
 function getUptimeString() {
   let totalSeconds = Math.floor((Date.now() - bootTime) / 1000);
@@ -23,89 +32,22 @@ function getUptimeString() {
   return `${days}d, ${hours}h, ${minutes}m, ${seconds}s`;
 }
 
-// Dynamically extracts and preserves any matching format extension seamlessly
-async function uploadToGitHub(buffer, originalFilename) {
-  const id = nanoid(8);
-  const ext = originalFilename.split('.').pop().toLowerCase();
-  const path = `images/${id}.${ext}`; 
-  const content = buffer.toString("base64");
-
-  await axios.put(
-    `${GITHUB_API}/repos/${process.env.GITHUB_REPO}/contents/${path}`,
-    {
-      message: `upload ${id}.${ext}`,
-      content: content,
-    },
-    {
-      headers: {
-        Authorization: `token ${process.env.GITHUB_TOKEN}`,
-        Accept: "application/vnd.github+json",
-      },
-    }
-  );
-
-  return `${id}.${ext}`;
-}
-
-async function deleteFromGitHub(idOrFilename) {
-  const url = `${GITHUB_API}/repos/${process.env.GITHUB_REPO}/contents/images`;
-  const headers = {
-    Authorization: `token ${process.env.GITHUB_TOKEN}`,
-    Accept: "application/vnd.github+json",
-  };
-
-  const response = await axios.get(url, { headers });
-  const targetFile = response.data.find(file => file.name.startsWith(idOrFilename));
-
-  if (!targetFile) throw new Error("File not found");
-
-  const fileData = await axios.get(targetFile.url, { headers });
-  const sha = fileData.data.sha;
-
-  await axios.delete(targetFile.url, {
-    headers,
-    data: {
-      message: `delete ${targetFile.name}`,
-      sha: sha,
-    },
-  });
-}
-
-async function fetchRepoImages() {
-  const url = `${GITHUB_API}/repos/${process.env.GITHUB_REPO}/contents/images`;
-  const headers = {
-    Authorization: `token ${process.env.GITHUB_TOKEN}`,
-    Accept: "application/vnd.github+json",
-  };
-
-  try {
-    const response = await axios.get(url, { headers });
-    // Grabs any files inside your assets directory dynamically
-    return response.data.filter(file => /\.(png|jpg|jpeg|gif|mp4|mov|webm|avi|mkv)$/i.test(file.name));
-  } catch (error) {
-    if (error.response && error.response.status === 404) return [];
-    throw error;
-  }
-}
-
 // ---------------- DISCORD BOT LOGIC ----------------
 
 async function registerSlashCommands() {
   const commands = [
-    // Command 1: Image Upload (Updated Name)
     new SlashCommandBuilder()
       .setName("image-upload")
-      .setDescription("Upload an image to your database")
+      .setDescription("Upload an image to your R2 cloud database")
       .setContexts([0, 1, 2])
       .addAttachmentOption(option =>
         option.setName("image").setDescription("The image file to upload").setRequired(true)
       )
       .toJSON(),
 
-    // Command 2: Video Upload (Updated Name)
     new SlashCommandBuilder()
       .setName("video-upload")
-      .setDescription("Upload a video clip to your database")
+      .setDescription("Upload a video clip to your R2 cloud database")
       .setContexts([0, 1, 2])
       .addAttachmentOption(option =>
         option.setName("video").setDescription("The video file to upload").setRequired(true)
@@ -148,31 +90,42 @@ async function registerSlashCommands() {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // PROCESS COMBINED UPLOAD LOGIC
+  // PROCESS COMBINED UPLOAD LOGIC (IMAGES & VIDEOS)
   if (interaction.commandName === "image-upload" || interaction.commandName === "video-upload") {
     const isVideoCmd = interaction.commandName === "video-upload";
     const file = interaction.options.getAttachment(isVideoCmd ? "video" : "image");
 
     const processingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription(`⏳ **Processing your file and syncing upstream to database...**`);
+      .setDescription(`⏳ **Processing file and uploading directly to Cloudflare R2...**`);
 
     await interaction.reply({ embeds: [processingEmbed] });
 
     try {
       const res = await axios.get(file.url, { responseType: "arraybuffer" });
-      const fullFilename = await uploadToGitHub(Buffer.from(res.data), file.name);
+      const buffer = Buffer.from(res.data);
       
-      const shortId = fullFilename.split('.')[0];
-      const ext = fullFilename.split('.').pop().toLowerCase();
+      const shortId = nanoid(8);
+      const ext = file.name.split('.').pop().toLowerCase();
+      const filename = `${shortId}.${ext}`;
       const isVideoFile = ["mp4", "mov", "webm", "avi", "mkv"].includes(ext);
+
+      // Upload binary payload directly into the Cloudflare R2 Bucket
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: process.env.R2_BUCKET_NAME,
+          Key: filename,
+          Body: buffer,
+          ContentType: file.contentType,
+        })
+      );
 
       const url = `${process.env.BASE_URL}/${shortId}`;
 
       const successEmbed = new EmbedBuilder()
         .setColor("#2ECC71")
         .setTitle(`📦 ${isVideoFile ? "Video" : "Image"} Upload Successful!`)
-        .setDescription(`Your file has been added to your database.`)
+        .setDescription(`Your file has been added to your R2 cloud storage.`)
         .addFields(
           { name: "🔗 Short URL", value: `\`${url}\`\n[Open Link](${url})`, inline: false },
           { name: "🆔 File ID", value: `\`${shortId}\` (\`.${ext}\`)`, inline: true }
@@ -189,7 +142,7 @@ client.on("interactionCreate", async (interaction) => {
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
         .setTitle("❌ Upload Failed")
-        .setDescription("Something went wrong while trying to process your file.");
+        .setDescription("Something went wrong while executing the Cloudflare R2 object transaction.");
       await interaction.editReply({ embeds: [errorEmbed], content: null });
     }
   }
@@ -200,17 +153,28 @@ client.on("interactionCreate", async (interaction) => {
 
     const processingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription(`⏳ **Attempting to delete asset reference \`${id}\` from database...**`);
+      .setDescription(`⏳ **Scanning cloud architecture to purge asset reference \`${id}\`...**`);
 
     await interaction.reply({ embeds: [processingEmbed] });
 
     try {
-      await deleteFromGitHub(id);
+      // Find the file name and extension matching the short ID prefix
+      const listRes = await s3.send(new ListObjectsV2Command({ Bucket: process.env.R2_BUCKET_NAME }));
+      const targetFile = listRes.Contents?.find(item => item.Key.startsWith(id));
+
+      if (!targetFile) throw new Error("File not found");
+
+      await s3.send(
+        new DeleteObjectCommand({
+          Bucket: process.env.R2_BUCKET_NAME,
+          Key: targetFile.Key,
+        })
+      );
 
       const deleteEmbed = new EmbedBuilder()
         .setColor("#E67E22")
         .setTitle("🗑️ Media Deleted")
-        .setDescription(`The asset file associated with ID \`${id}\` has been deleted from your database.`)
+        .setDescription(`The asset file associated with ID \`${id}\` has been scrubbed from your R2 cloud bucket.`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [deleteEmbed] });
@@ -219,7 +183,7 @@ client.on("interactionCreate", async (interaction) => {
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
         .setTitle("❌ Deletion Failed")
-        .setDescription(`Could not find or delete a file with the ID reference \`${id}\`.`);
+        .setDescription(`Could not find or delete a file with the ID reference \`${id}\` from the cloud storage bucket.`);
       await interaction.editReply({ embeds: [errorEmbed] });
     }
   }
@@ -228,25 +192,26 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.commandName === "list") {
     const loadingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription("⏳ **Fetching media from the database...**");
+      .setDescription("⏳ **Fetching media indexing tables from Cloudflare R2...**");
 
     await interaction.reply({ embeds: [loadingEmbed] });
 
     try {
-      const images = await fetchRepoImages();
+      const listRes = await s3.send(new ListObjectsV2Command({ Bucket: process.env.R2_BUCKET_NAME }));
+      const items = listRes.Contents || [];
 
-      if (images.length === 0) {
+      if (items.length === 0) {
         const emptyEmbed = new EmbedBuilder()
           .setColor("#95A5A6")
           .setTitle("📁 Database Empty")
-          .setDescription("There are currently media in your database.")
+          .setDescription("There are currently no active media assets inside your cloud storage bucket.")
           .setTimestamp();
         return await interaction.editReply({ embeds: [emptyEmbed] });
       }
 
-      const idList = images.map((img, index) => {
-        const cleanId = img.name.split('.')[0];
-        const ext = img.name.split('.').pop();
+      const idList = items.map((item, index) => {
+        const cleanId = item.Key.split('.')[0];
+        const ext = item.Key.split('.').pop();
         const icon = ["mp4", "mov", "webm", "avi", "mkv"].includes(ext.toLowerCase()) ? "🎥" : "🖼️";
         return `\`${index + 1}.\` ${icon} **${cleanId}** (\`.${ext}\`) ([Link](${process.env.BASE_URL}/${cleanId}))`;
       }).join("\n");
@@ -256,7 +221,7 @@ client.on("interactionCreate", async (interaction) => {
       const listEmbed = new EmbedBuilder()
         .setColor("#3498DB")
         .setTitle("📊 Database Overview")
-        .setDescription(`### Total Media: \`${images.length}\`\n\n${trimmedList}`)
+        .setDescription(`### Total Media: \`${items.length}\`\n\n${trimmedList}`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [listEmbed] });
@@ -265,7 +230,7 @@ client.on("interactionCreate", async (interaction) => {
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
         .setTitle("❌ Fetch Failed")
-        .setDescription("Could not successfully request repository directory listings.");
+        .setDescription("Failed to securely connect and fetch system catalog indexes from the R2 endpoint.");
       await interaction.editReply({ embeds: [errorEmbed] });
     }
   }
@@ -283,7 +248,7 @@ client.on("interactionCreate", async (interaction) => {
         { name: "Latency", value: `📡 ${latency}ms`, inline: true },
         { name: "Uptime", value: `⏳ ${uptime}`, inline: false }
       )
-      .setFooter({ text: "Jahmunkey Image Management System" })
+      .setFooter({ text: "Jahmunkey Storage Engine" })
       .setTimestamp();
 
     await interaction.reply({ embeds: [pingEmbed] });
@@ -315,7 +280,7 @@ app.get("/", (req, res) => {
         <div class="card">
             <div class="status-icon">🐒</div>
             <h1>Jahmunkey Image Service</h1>
-            <p>Your private image/video redirect engine is operational.</p>
+            <p>Your private R2 cloud-linked redirect engine is operational.</p>
             <div class="badge">● Bot Online</div>
         </div>
     </body>
@@ -325,25 +290,22 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => res.status(200).send("OK"));
 
+// Redirect router fetches matching file structures instantly from Cloudflare cache
 app.get("/:id", async (req, res) => {
   const id = req.params.id;
-  const url = `https://api.github.com/repos/${process.env.GITHUB_REPO}/contents/images`;
-  const headers = {
-    Authorization: `token ${process.env.GITHUB_TOKEN}`,
-    Accept: "application/vnd.github+json",
-  };
 
   try {
-    const response = await axios.get(url, { headers });
-    const targetFile = response.data.find(file => file.name.startsWith(id));
+    const listRes = await s3.send(new ListObjectsV2Command({ Bucket: process.env.R2_BUCKET_NAME }));
+    const targetFile = listRes.Contents?.find(item => item.Key.startsWith(id));
 
     if (targetFile) {
-      const rawUrl = `https://raw.githubusercontent.com/${process.env.GITHUB_REPO}/main/images/${targetFile.name}`;
-      return res.redirect(rawUrl);
+      // Dynamically forward the request directly to Cloudflare's public dev URL
+      const publicCdnUrl = `${process.env.R2_CDN_URL}/${targetFile.Key}`;
+      return res.redirect(publicCdnUrl);
     }
     res.status(404).send("Asset file not found.");
   } catch (error) {
-    res.status(500).send("Internal Redirect Engine Routing Error.");
+    res.status(500).send("Internal Cloud Router Routing Error.");
   }
 });
 
