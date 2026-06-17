@@ -1,3 +1,3 @@
-Convert images to links!
+Convert images and videos to links!
 
 Developed by vax
