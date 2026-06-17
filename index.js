@@ -4,7 +4,6 @@ const express = require("express");
 const { nanoid } = require("nanoid");
 require("dotenv").config();
 
-// Mark the exact timestamp when the bot boots up for uptime tracking
 const bootTime = Date.now();
 
 const client = new Client({
@@ -13,7 +12,6 @@ const client = new Client({
 
 const GITHUB_API = "https://api.github.com";
 
-// Helper function to convert boot runtime into a clean string
 function getUptimeString() {
   let totalSeconds = Math.floor((Date.now() - bootTime) / 1000);
   let days = Math.floor(totalSeconds / 86400);
@@ -25,16 +23,17 @@ function getUptimeString() {
   return `${days}d, ${hours}h, ${minutes}m, ${seconds}s`;
 }
 
-// Helper function to upload image buffer to GitHub
-async function uploadToGitHub(buffer) {
+// Dynamically extracts and preserves any matching format extension seamlessly
+async function uploadToGitHub(buffer, originalFilename) {
   const id = nanoid(8);
-  const path = `images/${id}.png`;
+  const ext = originalFilename.split('.').pop().toLowerCase();
+  const path = `images/${id}.${ext}`; 
   const content = buffer.toString("base64");
 
   await axios.put(
     `${GITHUB_API}/repos/${process.env.GITHUB_REPO}/contents/${path}`,
     {
-      message: `upload ${id}`,
+      message: `upload ${id}.${ext}`,
       content: content,
     },
     {
@@ -45,31 +44,33 @@ async function uploadToGitHub(buffer) {
     }
   );
 
-  return id;
+  return `${id}.${ext}`;
 }
 
-// Helper function to delete an image from GitHub automatically
-async function deleteFromGitHub(id) {
-  const path = `images/${id}.png`;
-  const url = `${GITHUB_API}/repos/${process.env.GITHUB_REPO}/contents/${path}`;
+async function deleteFromGitHub(idOrFilename) {
+  const url = `${GITHUB_API}/repos/${process.env.GITHUB_REPO}/contents/images`;
   const headers = {
     Authorization: `token ${process.env.GITHUB_TOKEN}`,
     Accept: "application/vnd.github+json",
   };
 
-  const fileData = await axios.get(url, { headers });
+  const response = await axios.get(url, { headers });
+  const targetFile = response.data.find(file => file.name.startsWith(idOrFilename));
+
+  if (!targetFile) throw new Error("File not found");
+
+  const fileData = await axios.get(targetFile.url, { headers });
   const sha = fileData.data.sha;
 
-  await axios.delete(url, {
+  await axios.delete(targetFile.url, {
     headers,
     data: {
-      message: `delete ${id}`,
+      message: `delete ${targetFile.name}`,
       sha: sha,
     },
   });
 }
 
-// Helper function to fetch all hosted files from GitHub
 async function fetchRepoImages() {
   const url = `${GITHUB_API}/repos/${process.env.GITHUB_REPO}/contents/images`;
   const headers = {
@@ -79,7 +80,8 @@ async function fetchRepoImages() {
 
   try {
     const response = await axios.get(url, { headers });
-    return response.data.filter(file => file.name.endsWith(".png"));
+    // Grabs any files inside your assets directory dynamically
+    return response.data.filter(file => /\.(png|jpg|jpeg|gif|mp4|mov|webm|avi|mkv)$/i.test(file.name));
   } catch (error) {
     if (error.response && error.response.status === 404) return [];
     throw error;
@@ -90,34 +92,41 @@ async function fetchRepoImages() {
 
 async function registerSlashCommands() {
   const commands = [
-    // Command 1: Convert/Upload
+    // Command 1: Image Upload (Updated Name)
     new SlashCommandBuilder()
-      .setName("convert")
-      .setDescription("Upload an image to the database")
+      .setName("image-upload")
+      .setDescription("Upload an image asset to your custom domain")
       .setContexts([0, 1, 2])
       .addAttachmentOption(option =>
-        option.setName("image").setDescription("The image to upload").setRequired(true)
+        option.setName("image").setDescription("The image file to upload").setRequired(true)
       )
       .toJSON(),
 
-    // Command 2: Delete Image
+    // Command 2: Video Upload (Updated Name)
+    new SlashCommandBuilder()
+      .setName("video-upload")
+      .setDescription("Upload a video clip to your custom domain")
+      .setContexts([0, 1, 2])
+      .addAttachmentOption(option =>
+        option.setName("video").setDescription("The video file to upload").setRequired(true)
+      )
+      .toJSON(),
+
     new SlashCommandBuilder()
       .setName("delete")
-      .setDescription("Delete an image from the database")
+      .setDescription("Delete a file from your repository using its ID")
       .setContexts([0, 1, 2])
       .addStringOption(option =>
-        option.setName("id").setDescription("The 8-character ID of the image (e.g., 59U2Abz_)").setRequired(true)
+        option.setName("id").setDescription("The character ID code of the file").setRequired(true)
       )
       .toJSON(),
 
-    // Command 3: List Images
     new SlashCommandBuilder()
       .setName("list")
-      .setDescription("Show total image count and active IDs inside your database")
+      .setDescription("Show total asset counts and active IDs inside your storage")
       .setContexts([0, 1, 2])
       .toJSON(),
 
-    // Command 4: Ping Status (NEW)
     new SlashCommandBuilder()
       .setName("ping")
       .setDescription("Check Jahmunkey's dynamic connection latency and system uptime")
@@ -129,10 +138,7 @@ async function registerSlashCommands() {
 
   try {
     console.log("Started refreshing application (/) commands.");
-    await rest.put(
-      Routes.applicationCommands(process.env.CLIENT_ID),
-      { body: commands }
-    );
+    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
     console.log("Successfully reloaded application (/) commands.");
   } catch (error) {
     console.error("Error registering slash commands:", error);
@@ -142,39 +148,49 @@ async function registerSlashCommands() {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // HANDLE CONVERT COMMAND
-  if (interaction.commandName === "convert") {
-    const file = interaction.options.getAttachment("image");
+  // PROCESS COMBINED UPLOAD LOGIC
+  if (interaction.commandName === "image-upload" || interaction.commandName === "video-upload") {
+    const isVideoCmd = interaction.commandName === "video-upload";
+    const file = interaction.options.getAttachment(isVideoCmd ? "video" : "image");
 
     const processingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription("⏳ **Processing your image and uploading to database...**");
+      .setDescription(`⏳ **Processing your file and syncing upstream to GitHub...**`);
 
     await interaction.reply({ embeds: [processingEmbed] });
 
     try {
       const res = await axios.get(file.url, { responseType: "arraybuffer" });
-      const id = await uploadToGitHub(Buffer.from(res.data));
-      const url = `${process.env.BASE_URL}/${id}`;
+      const fullFilename = await uploadToGitHub(Buffer.from(res.data), file.name);
+      
+      const shortId = fullFilename.split('.')[0];
+      const ext = fullFilename.split('.').pop().toLowerCase();
+      const isVideoFile = ["mp4", "mov", "webm", "avi", "mkv"].includes(ext);
+
+      const url = `${process.env.BASE_URL}/${shortId}`;
 
       const successEmbed = new EmbedBuilder()
         .setColor("#2ECC71")
-        .setTitle("📦 Image Upload Successful!")
-        .setDescription(`Your image has been processed and uploaded.`)
+        .setTitle(`📦 ${isVideoFile ? "Video" : "Image"} Upload Successful!`)
+        .setDescription(`Your file has been processed and hosted under your custom domain.`)
         .addFields(
           { name: "🔗 Short URL", value: `\`${url}\`\n[Open Link](${url})`, inline: false },
-          { name: "🆔 Image ID", value: `\`${id}\``, inline: true }
+          { name: "🆔 File ID", value: `\`${shortId}\` (\`.${ext}\`)`, inline: true }
         )
         .setTimestamp();
 
-      await interaction.editReply({ embeds: [successEmbed] });
+      if (isVideoFile) {
+        await interaction.editReply({ embeds: [successEmbed], content: `🎥 **Video Player Preview:**\n${url}` });
+      } else {
+        await interaction.editReply({ embeds: [successEmbed], content: null });
+      }
     } catch (e) {
       console.error(e);
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
         .setTitle("❌ Upload Failed")
-        .setDescription("Something went wrong while trying to process and upload your image.");
-      await interaction.editReply({ embeds: [errorEmbed] });
+        .setDescription("Something went wrong while trying to process your asset file.");
+      await interaction.editReply({ embeds: [errorEmbed], content: null });
     }
   }
 
@@ -184,7 +200,7 @@ client.on("interactionCreate", async (interaction) => {
 
     const processingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription(`⏳ **Attempting to delete image \`${id}\` from database...**`);
+      .setDescription(`⏳ **Attempting to purge asset reference \`${id}\` from GitHub...**`);
 
     await interaction.reply({ embeds: [processingEmbed] });
 
@@ -193,8 +209,8 @@ client.on("interactionCreate", async (interaction) => {
 
       const deleteEmbed = new EmbedBuilder()
         .setColor("#E67E22")
-        .setTitle("🗑️ Image Deleted Successfully")
-        .setDescription(`The image file associated with ID \`${id}\` has been deleted from your database.`)
+        .setTitle("🗑️ Storage Cleared")
+        .setDescription(`The asset file associated with ID \`${id}\` has been scrubbed from your GitHub repository.`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [deleteEmbed] });
@@ -203,7 +219,7 @@ client.on("interactionCreate", async (interaction) => {
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
         .setTitle("❌ Deletion Failed")
-        .setDescription(`Could not find or delete an image with the ID \`${id}\`. Make sure the ID is correct.`);
+        .setDescription(`Could not find or delete a file with the ID reference \`${id}\`.`);
       await interaction.editReply({ embeds: [errorEmbed] });
     }
   }
@@ -212,7 +228,7 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.commandName === "list") {
     const loadingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription("⏳ **Fetching image counts and details from database...**");
+      .setDescription("⏳ **Fetching media counts and file index from GitHub...**");
 
     await interaction.reply({ embeds: [loadingEmbed] });
 
@@ -222,23 +238,25 @@ client.on("interactionCreate", async (interaction) => {
       if (images.length === 0) {
         const emptyEmbed = new EmbedBuilder()
           .setColor("#95A5A6")
-          .setTitle("📁 Database Empty")
-          .setDescription("There are currently no pictures inside your databse.")
+          .setTitle("📁 Storage Empty")
+          .setDescription("There are currently no assets hosted inside your repository path.")
           .setTimestamp();
         return await interaction.editReply({ embeds: [emptyEmbed] });
       }
 
       const idList = images.map((img, index) => {
-        const cleanId = img.name.replace(".png", "");
-        return `\`${index + 1}.\` **${cleanId}** ([Link](${process.env.BASE_URL}/${cleanId}))`;
+        const cleanId = img.name.split('.')[0];
+        const ext = img.name.split('.').pop();
+        const icon = ["mp4", "mov", "webm", "avi", "mkv"].includes(ext.toLowerCase()) ? "🎥" : "🖼️";
+        return `\`${index + 1}.\` ${icon} **${cleanId}** (\`.${ext}\`) ([Link](${process.env.BASE_URL}/${cleanId}))`;
       }).join("\n");
 
       const trimmedList = idList.length > 3800 ? idList.substring(0, 3800) + "\n*...and more files*" : idList;
 
       const listEmbed = new EmbedBuilder()
         .setColor("#3498DB")
-        .setTitle("📊 Database Overview")
-        .setDescription(`### Total Pictures: \`${images.length}\`\n\n${trimmedList}`)
+        .setTitle("📊 Storage Directory Overview")
+        .setDescription(`### Total Hosted Media: \`${images.length}\`\n\n${trimmedList}`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [listEmbed] });
@@ -247,18 +265,18 @@ client.on("interactionCreate", async (interaction) => {
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
         .setTitle("❌ Fetch Failed")
-        .setDescription("Could not successfully request file storage contents from database.");
+        .setDescription("Could not successfully request repository directory listings.");
       await interaction.editReply({ embeds: [errorEmbed] });
     }
   }
 
-  // HANDLE PING COMMAND (NEW)
+  // HANDLE PING COMMAND
   if (interaction.commandName === "ping") {
     const latency = client.ws.ping;
     const uptime = getUptimeString();
 
     const pingEmbed = new EmbedBuilder()
-      .setColor("#9B59B6") // Purple border matching your logger theme style
+      .setColor("#9B59B6")
       .setTitle("🐒 Jahmunkey Status")
       .addFields(
         { name: "Connection", value: "✅ Online", inline: true },
@@ -284,64 +302,20 @@ app.get("/", (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>System Status | Vax Images</title>
         <style>
-            body {
-                background-color: #0f111a;
-                color: #ffffff;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                margin: 0;
-            }
-            .card {
-                background-color: #1a1c29;
-                padding: 2.5rem;
-                border-radius: 12px;
-                box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-                text-align: center;
-                border: 1px solid #2d3142;
-                max-width: 400px;
-                width: 100%;
-            }
-            .status-icon {
-                font-size: 3.5rem;
-                margin-bottom: 1rem;
-                animation: pulse 2s infinite;
-            }
-            h1 {
-                margin: 0 0 0.5rem 0;
-                font-size: 1.8rem;
-                letter-spacing: 0.5px;
-            }
-            p {
-                color: #8b92b6;
-                margin: 0 0 1.5rem 0;
-                font-size: 1rem;
-            }
-            .badge {
-                background-color: #05c46b;
-                color: #ffffff;
-                padding: 0.5rem 1rem;
-                border-radius: 20px;
-                font-weight: 600;
-                font-size: 0.85rem;
-                text-transform: uppercase;
-                display: inline-block;
-                letter-spacing: 1px;
-            }
-            @keyframes pulse {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.05); }
-                100% { transform: scale(1); }
-            }
+            body { background-color: #0f111a; color: #ffffff; font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .card { background-color: #1a1c29; padding: 2.5rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); text-align: center; border: 1px solid #2d3142; max-width: 400px; width: 100%; }
+            .status-icon { font-size: 3.5rem; margin-bottom: 1rem; animation: pulse 2s infinite; }
+            h1 { margin: 0 0 0.5rem 0; font-size: 1.8rem; }
+            p { color: #8b92b6; margin: 0 0 1.5rem 0; }
+            .badge { background-color: #05c46b; color: #ffffff; padding: 0.5rem 1rem; border-radius: 20px; font-weight: 600; display: inline-block; }
+            @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
         </style>
     </head>
     <body>
         <div class="card">
             <div class="status-icon">🐒</div>
             <h1>Jahmunkey Image Service</h1>
-            <p>Your private image redirect engine is operational.</p>
+            <p>Your private image/video redirect engine is operational.</p>
             <div class="badge">● Bot Online</div>
         </div>
     </body>
@@ -351,10 +325,26 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => res.status(200).send("OK"));
 
-app.get("/:id", (req, res) => {
+app.get("/:id", async (req, res) => {
   const id = req.params.id;
-  const rawUrl = `https://raw.githubusercontent.com/${process.env.GITHUB_REPO}/main/images/${id}.png`;
-  res.redirect(rawUrl);
+  const url = `https://api.github.com/repos/${process.env.GITHUB_REPO}/contents/images`;
+  const headers = {
+    Authorization: `token ${process.env.GITHUB_TOKEN}`,
+    Accept: "application/vnd.github+json",
+  };
+
+  try {
+    const response = await axios.get(url, { headers });
+    const targetFile = response.data.find(file => file.name.startsWith(id));
+
+    if (targetFile) {
+      const rawUrl = `https://raw.githubusercontent.com/${process.env.GITHUB_REPO}/main/images/${targetFile.name}`;
+      return res.redirect(rawUrl);
+    }
+    res.status(404).send("Asset file not found.");
+  } catch (error) {
+    res.status(500).send("Internal Redirect Engine Routing Error.");
+  }
 });
 
 const PORT = process.env.PORT || 10000;
