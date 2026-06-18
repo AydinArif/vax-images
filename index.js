@@ -12,9 +12,9 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.DirectMessages // ◄── ADD THIS INTENT HERE
+    GatewayIntentBits.DirectMessages
   ],
-  partials: [1] // ◄── ADD THIS LINE (1 stands for Partials.Channel)
+  partials: [1] 
 });
 
 // Initialize S3 Client configured explicitly for Cloudflare R2
@@ -83,10 +83,10 @@ client.on("messageCreate", async (message) => {
     const file = message.attachments.first();
 
     if (!file) {
-      return message.reply("❌ You need to attach a media file alongside the command!");
+      return message.reply("<:wrong:1517029715972460605> You need to attach a media file alongside the command!");
     }
 
-    const msgReply = await message.reply("⏳ **Processing file payload buffer and streaming cleanly to Cloudflare R2...**");
+    const msgReply = await message.reply("<:vax_timer:1517030316022431804> **Processing file payload buffer and streaming cleanly to database...**");
 
     try {
       const res = await axios.get(file.url, { responseType: "arraybuffer" });
@@ -111,22 +111,22 @@ client.on("messageCreate", async (message) => {
 
       const successEmbed = new EmbedBuilder()
         .setColor("#2ECC71")
-        .setTitle(`📦 Cloud Transfer Complete!`)
-        .setDescription(`Your asset has been hosted permanently via text routing pipeline.`)
+        .setTitle(`✔ Upload Complete!`)
+        .setDescription(`Your media has been uploaded to the database successfully.`)
         .addFields(
-          { name: "🔗 Short URL", value: `\`${url}\`\n[Open Link](${url})`, inline: false },
-          { name: "🆔 File ID", value: `\`${shortId}\` (\`.${ext}\`)`, inline: true }
+          { name: "<:vax_link:1517032708713222236> Short URL", value: `\`${url}\`\n[Media Link](${url})`, inline: false },
+          { name: "<:vax_id:1517032674030780537> File ID", value: `\`${shortId}\` (\`.${ext}\`)`, inline: true }
         )
         .setTimestamp();
 
       if (isVideoFile) {
-        await msgReply.edit({ embeds: [successEmbed], content: `🎥 **Video Player Preview:**\n${url}` });
+        await msgReply.edit({ embeds: [successEmbed], content: `<:vax_vid:1517027665859837982> **Video Player Preview:**\n${url}` });
       } else {
         await msgReply.edit({ embeds: [successEmbed], content: null });
       }
     } catch (e) {
       console.error(e);
-      await msgReply.edit({ content: "❌ **Upload Failed:** Cloud transaction error or connection timeout.", embeds: [] });
+      await msgReply.edit({ content: "<:wrong:1517029715972460605> **Upload Failed:** Database error or connection timeout.", embeds: [] });
     }
   }
 });
@@ -140,7 +140,7 @@ client.on("interactionCreate", async (interaction) => {
     const id = interaction.options.getString("id").trim();
     const processingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription(`⏳ **Scanning cloud architecture to purge asset reference \`${id}\`...**`);
+      .setDescription(`<:vax_timer:1517030316022431804> **Scanning database \`${id}\`...**`);
 
     await interaction.reply({ embeds: [processingEmbed] });
 
@@ -159,8 +159,8 @@ client.on("interactionCreate", async (interaction) => {
 
       const deleteEmbed = new EmbedBuilder()
         .setColor("#E67E22")
-        .setTitle("🗑️ Media Deleted")
-        .setDescription(`The asset file associated with ID \`${id}\` has been scrubbed from your R2 cloud bucket.`)
+        .setTitle("✔ Media Deleted")
+        .setDescription(`The asset file associated with ID \`${id}\` has been removed from your database`)
         .setTimestamp();
 
       await interaction.editReply({ embeds: [deleteEmbed] });
@@ -168,8 +168,8 @@ client.on("interactionCreate", async (interaction) => {
       console.error(e);
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
-        .setTitle("❌ Deletion Failed")
-        .setDescription(`Could not find or delete a file with the ID reference \`${id}\` from the cloud storage bucket.`);
+        .setTitle("<:wrong:1517029715972460605> Deletion Failed")
+        .setDescription(`Could not find or delete a file with the ID reference \`${id}\` from the database.`);
       await interaction.editReply({ embeds: [errorEmbed] });
     }
   }
@@ -178,7 +178,7 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.commandName === "list") {
     const loadingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setDescription("⏳ **Fetching media indexing tables from Cloudflare R2...**");
+      .setDescription("<:vax_timer:1517030316022431804> **Fetching media from database...**");
 
     await interaction.reply({ embeds: [loadingEmbed] });
 
@@ -189,8 +189,8 @@ client.on("interactionCreate", async (interaction) => {
       if (items.length === 0) {
         const emptyEmbed = new EmbedBuilder()
           .setColor("#95A5A6")
-          .setTitle("📁 Database Empty")
-          .setDescription("There are currently no active media assets inside your cloud storage bucket.")
+          .setTitle("<:vax_folder:1517031525135421480> Database Empty")
+          .setDescription("There are currently no active media in your database.")
           .setTimestamp();
         return await interaction.editReply({ embeds: [emptyEmbed] });
       }
@@ -198,7 +198,7 @@ client.on("interactionCreate", async (interaction) => {
       const idList = items.map((item, index) => {
         const cleanId = item.Key.split('.')[0];
         const ext = item.Key.split('.').pop();
-        const icon = ["mp4", "mov", "webm", "avi", "mkv"].includes(ext.toLowerCase()) ? "🎥" : "🖼️";
+        const icon = ["mp4", "mov", "webm", "avi", "mkv"].includes(ext.toLowerCase()) ? "<:vax_vid:1517027665859837982>" : "<:vax_img:1517027805228040292>";
         return `\`${index + 1}.\` ${icon} **${cleanId}** (\`.${ext}\`) ([Link](${process.env.BASE_URL}/${cleanId}))`;
       }).join("\n");
 
@@ -215,8 +215,8 @@ client.on("interactionCreate", async (interaction) => {
       console.error(e);
       const errorEmbed = new EmbedBuilder()
         .setColor("#E74C3C")
-        .setTitle("❌ Fetch Failed")
-        .setDescription("Failed to securely connect and fetch system catalog indexes from the R2 endpoint.");
+        .setTitle("<:wrong:1517029715972460605> Fetch Failed")
+        .setDescription("Failed to fetch items from database.");
       await interaction.editReply({ embeds: [errorEmbed] });
     }
   }
@@ -230,9 +230,9 @@ client.on("interactionCreate", async (interaction) => {
       .setColor("#9B59B6")
       .setTitle("🐒 Jahmunkey Status")
       .addFields(
-        { name: "Connection", value: "✅ Online", inline: true },
+        { name: "Connection", value: "🟢 Online", inline: true },
         { name: "Latency", value: `📡 ${latency}ms`, inline: true },
-        { name: "Uptime", value: `⏳ ${uptime}`, inline: false }
+        { name: "Uptime", value: `<:vax_timer:1517030316022431804> ${uptime}`, inline: false }
       )
       .setFooter({ text: "Jahmunkey Storage Engine" })
       .setTimestamp();
@@ -274,7 +274,35 @@ app.get("/", (req, res) => {
   `);
 });
 
-app.get("/health", (req, res) => res.status(200).send("OK"));
+app.get("/health", (req, res) => {
+  res.status(200).send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Health Check | Jahmunkey</title>
+        <style>
+            body { background-color: #0f111a; color: #ffffff; font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .health-card { background-color: #1a1c29; padding: 2rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); text-align: center; border: 1px solid #2d3142; max-width: 350px; width: 100%; }
+            .pulse-dot { width: 12px; height: 12px; background-color: #05c46b; border-radius: 50%; display: inline-block; margin-right: 8px; box-shadow: 0 0 12px #05c46b; animation: emit 1.5s infinite ease-in-out; }
+            .status-container { display: flex; align-items: center; justify-content: center; background-color: #11131e; border: 1px solid #25283a; padding: 0.75rem 1.5rem; border-radius: 8px; font-weight: 600; color: #05c46b; font-size: 1.1rem; letter-spacing: 0.5px; }
+            h2 { margin: 0 0 1rem 0; font-size: 1.4rem; color: #ffffff; font-weight: 500; }
+            @keyframes emit { 0% { transform: scale(0.9); opacity: 0.6; } 50% { transform: scale(1.1); opacity: 1; box-shadow: 0 0 18px #05c46b; } 100% { transform: scale(0.9); opacity: 0.6; } }
+        </style>
+    </head>
+    <body>
+        <div class="health-card">
+            <h2>System Engine Vital</h2>
+            <div class="status-container">
+                <span class="pulse-dot"></span>
+                <span>STATUS: OK</span>
+            </div>
+        </div>
+    </body>
+    </html>
+  `);
+});
 
 app.get("/:id", async (req, res) => {
   const id = req.params.id;
