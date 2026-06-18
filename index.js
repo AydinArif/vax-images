@@ -8,7 +8,11 @@ require("dotenv").config();
 const bootTime = Date.now();
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ],
 });
 
 // Initialize S3 Client configured explicitly for Cloudflare R2
@@ -36,24 +40,6 @@ function getUptimeString() {
 
 async function registerSlashCommands() {
   const commands = [
-    new SlashCommandBuilder()
-      .setName("image-upload")
-      .setDescription("Upload an image to your R2 cloud database")
-      .setContexts([0, 1, 2])
-      .addAttachmentOption(option =>
-        option.setName("image").setDescription("The image file to upload").setRequired(true)
-      )
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("video-upload")
-      .setDescription("Upload a video clip to your R2 cloud database")
-      .setContexts([0, 1, 2])
-      .addAttachmentOption(option =>
-        option.setName("video").setDescription("The video file to upload").setRequired(true)
-      )
-      .toJSON(),
-
     new SlashCommandBuilder()
       .setName("delete")
       .setDescription("Delete a file from your database using its ID")
@@ -87,19 +73,18 @@ async function registerSlashCommands() {
   }
 }
 
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
+// ─── MAIN TEXT PIPELINE (Handles All Images, Gifs, and Raw Heavy Videos) ───
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
 
-  // PROCESS COMBINED UPLOAD LOGIC (IMAGES & VIDEOS)
-  if (interaction.commandName === "image-upload" || interaction.commandName === "video-upload") {
-    const isVideoCmd = interaction.commandName === "video-upload";
-    const file = interaction.options.getAttachment(isVideoCmd ? "video" : "image");
+  if (message.content.toLowerCase().startsWith("vax upload")) {
+    const file = message.attachments.first();
 
-    const processingEmbed = new EmbedBuilder()
-      .setColor("#5865F2")
-      .setDescription(`⏳ **Processing file and uploading directly to Cloudflare R2...**`);
+    if (!file) {
+      return message.reply("❌ You need to attach a media file alongside the command!");
+    }
 
-    await interaction.reply({ embeds: [processingEmbed] });
+    const msgReply = await message.reply("⏳ **Processing file payload buffer and streaming cleanly to Cloudflare R2...**");
 
     try {
       const res = await axios.get(file.url, { responseType: "arraybuffer" });
@@ -110,7 +95,7 @@ client.on("interactionCreate", async (interaction) => {
       const filename = `${shortId}.${ext}`;
       const isVideoFile = ["mp4", "mov", "webm", "avi", "mkv"].includes(ext);
 
-      // Upload binary payload directly into the Cloudflare R2 Bucket
+      // Direct cloud buffer upload
       await s3.send(
         new PutObjectCommand({
           Bucket: process.env.R2_BUCKET_NAME,
@@ -124,8 +109,8 @@ client.on("interactionCreate", async (interaction) => {
 
       const successEmbed = new EmbedBuilder()
         .setColor("#2ECC71")
-        .setTitle(`📦 ${isVideoFile ? "Video" : "Image"} Upload Successful!`)
-        .setDescription(`Your file has been added to your R2 cloud storage.`)
+        .setTitle(`📦 Cloud Transfer Complete!`)
+        .setDescription(`Your asset has been hosted permanently via text routing pipeline.`)
         .addFields(
           { name: "🔗 Short URL", value: `\`${url}\`\n[Open Link](${url})`, inline: false },
           { name: "🆔 File ID", value: `\`${shortId}\` (\`.${ext}\`)`, inline: true }
@@ -133,24 +118,24 @@ client.on("interactionCreate", async (interaction) => {
         .setTimestamp();
 
       if (isVideoFile) {
-        await interaction.editReply({ embeds: [successEmbed], content: `🎥 **Video Player Preview:**\n${url}` });
+        await msgReply.edit({ embeds: [successEmbed], content: `🎥 **Video Player Preview:**\n${url}` });
       } else {
-        await interaction.editReply({ embeds: [successEmbed], content: null });
+        await msgReply.edit({ embeds: [successEmbed], content: null });
       }
     } catch (e) {
       console.error(e);
-      const errorEmbed = new EmbedBuilder()
-        .setColor("#E74C3C")
-        .setTitle("❌ Upload Failed")
-        .setDescription("Something went wrong while executing the Cloudflare R2 object transaction.");
-      await interaction.editReply({ embeds: [errorEmbed], content: null });
+      await msgReply.edit({ content: "❌ **Upload Failed:** Cloud transaction error or connection timeout.", embeds: [] });
     }
   }
+});
+
+// ─── UTILITY INTERACTION INTERFACES ───
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
 
   // HANDLE DELETE COMMAND
   if (interaction.commandName === "delete") {
     const id = interaction.options.getString("id").trim();
-
     const processingEmbed = new EmbedBuilder()
       .setColor("#5865F2")
       .setDescription(`⏳ **Scanning cloud architecture to purge asset reference \`${id}\`...**`);
@@ -158,7 +143,6 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.reply({ embeds: [processingEmbed] });
 
     try {
-      // Find the file name and extension matching the short ID prefix
       const listRes = await s3.send(new ListObjectsV2Command({ Bucket: process.env.R2_BUCKET_NAME }));
       const targetFile = listRes.Contents?.find(item => item.Key.startsWith(id));
 
@@ -290,7 +274,6 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => res.status(200).send("OK"));
 
-// Redirect router fetches matching file structures instantly from Cloudflare cache
 app.get("/:id", async (req, res) => {
   const id = req.params.id;
 
@@ -299,7 +282,6 @@ app.get("/:id", async (req, res) => {
     const targetFile = listRes.Contents?.find(item => item.Key.startsWith(id));
 
     if (targetFile) {
-      // Dynamically forward the request directly to Cloudflare's public dev URL
       const publicCdnUrl = `${process.env.R2_CDN_URL}/${targetFile.Key}`;
       return res.redirect(publicCdnUrl);
     }
