@@ -86,7 +86,7 @@ client.on("messageCreate", async (message) => {
       return message.reply("<:wrong:1517029715972460605> You need to attach a media file alongside the command!");
     }
 
-    const msgReply = await message.reply("<:vax_timer:1517030316022431804> **Processing file payload buffer and streaming cleanly to database...**");
+    const msgReply = await message.reply("<:vax_timer:1517030316022431804> **Uploading your media to our database...**");
 
     try {
       const res = await axios.get(file.url, { responseType: "arraybuffer" });
@@ -114,7 +114,7 @@ client.on("messageCreate", async (message) => {
         .setTitle(`✔ Upload Complete!`)
         .setDescription(`Your media has been uploaded to the database successfully.`)
         .addFields(
-          { name: "<:vax_link:1517032708713222236> Short URL", value: `\`${url}\`\n[Media Link](${url})`, inline: false },
+          { name: "<:vax_link:1517032708713222236> Media URL", value: `\`${url}\`\n[Link](${url})`, inline: false },
           { name: "<:vax_id:1517032674030780537> File ID", value: `\`${shortId}\` (\`.${ext}\`)`, inline: true }
         )
         .setTimestamp();
@@ -190,7 +190,7 @@ client.on("interactionCreate", async (interaction) => {
         const emptyEmbed = new EmbedBuilder()
           .setColor("#95A5A6")
           .setTitle("<:vax_folder:1517031525135421480> Database Empty")
-          .setDescription("There are currently no active media in your database.")
+          .setDescription("There are currently no media in your database.")
           .setTimestamp();
         return await interaction.editReply({ embeds: [emptyEmbed] });
       }
@@ -206,7 +206,7 @@ client.on("interactionCreate", async (interaction) => {
 
       const listEmbed = new EmbedBuilder()
         .setColor("#3498DB")
-        .setTitle("📊 Database Overview")
+        .setTitle("📊 Database details")
         .setDescription(`### Total Media: \`${items.length}\`\n\n${trimmedList}`)
         .setTimestamp();
 
@@ -234,7 +234,7 @@ client.on("interactionCreate", async (interaction) => {
         { name: "Latency", value: `📡 ${latency}ms`, inline: true },
         { name: "Uptime", value: `<:vax_timer:1517030316022431804> ${uptime}`, inline: false }
       )
-      .setFooter({ text: "Jahmunkey Storage Engine" })
+      .setFooter({ text: "Jahmunkey Database" })
       .setTimestamp();
 
     await interaction.reply({ embeds: [pingEmbed] });
@@ -266,7 +266,7 @@ app.get("/", (req, res) => {
         <div class="card">
             <div class="status-icon">🐒</div>
             <h1>Jahmunkey Image Service</h1>
-            <p>Your private R2 cloud-linked redirect engine is operational.</p>
+            <p>Your cloudfare R2 image/video bot is fully functional</p>
             <div class="badge">● Bot Online</div>
         </div>
     </body>
