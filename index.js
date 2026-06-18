@@ -11,8 +11,10 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages // ◄── ADD THIS INTENT HERE
   ],
+  partials: [1] // ◄── ADD THIS LINE (1 stands for Partials.Channel)
 });
 
 // Initialize S3 Client configured explicitly for Cloudflare R2
